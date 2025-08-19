@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agendamento de Carros (Firestore)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+            },
+            colors: {
+              'primary-brand': '#3b82f6', // blue-500
+              'secondary-brand': '#60a5fa', // blue-400
+              'accent-brand': '#dbeafe', // blue-100
+              'dark-brand': '#1f2937', // gray-800
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      /* Estilo para a grade do calendário */
+      .calendar-grid {
+        display: grid;
+        grid-template-columns: repeat(7, minmax(0, 1fr));
+        gap: 0.5rem;
+      }
+      .day-cell {
+        min-height: 4rem;
+        border: 1px solid #e5e7eb;
+        border-radius: 0.5rem;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-start;
+        align-items: center;
+        padding: 0.25rem;
+        cursor: pointer;
+        transition: background-color 0.2s ease-in-out;
+      }
+      .day-cell.active-day {
+        background-color: #dbeafe; /* accent-brand */
+        border-color: #3b82f6; /* primary-brand */
+      }
+      .day-cell:hover {
+        background-color: #f3f4f6;
+      }
+      .day-cell.has-booking {
+        background-color: #bfdbfe; /* blue-200 */
+      }
+      .day-cell.has-booking.active-day {
+        background-color: #93c5fd; /* blue-300 */
+      }
+      .calendar-header {
+        text-align: center;
+        font-weight: bold;
+      }
+      .user-id-container {
+        word-wrap: break-word;
+        word-break: break-all;
+      }
+      /* Estilo para a caixa de mensagem */
+      .message-box {
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 1000;
+        padding: 1rem 2rem;
+        border-radius: 0.5rem;
+        font-weight: 500;
+        text-align: center;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        display: none;
+      }
+      .message-box.success {
+        background-color: #4CAF50;
+        color: white;
+      }
+      .message-box.error {
+        background-color: #f44336;
+        color: white;
+      }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800 font-sans p-4 md:p-8">
+
+    <!-- Caixa de Mensagem -->
+    <div id="message-box" class="message-box"></div>
+
+    <!-- Container Principal -->
+    <div id="main-app" class="max-w-6xl mx-auto bg-white p-6 md:p-10 rounded-xl shadow-lg border border-gray-200">
+        <h1 class="text-3xl font-bold text-center text-primary-brand mb-8">Agendamento de Carros da Empresa</h1>
+        
+        <!-- Exibe o ID do usuário para identificação -->
+        <div class="text-center text-sm text-gray-500 mb-4 user-id-container">
+            Seu ID de Usuário (Anônimo): <span id="user-id" class="font-mono font-semibold text-gray-700">Carregando...</span>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12">
+            <!-- Seção do Formulário de Agendamento -->
+            <div class="p-6 bg-gray-50 rounded-lg border border-gray-200 shadow-inner">
+                <h2 class="text-2xl font-semibold mb-6 text-dark-brand">Agendar Carro</h2>
+                <form id="booking-form" class="space-y-6">
+                    <div>
+                        <label for="employee-name" class="block text-sm font-medium text-gray-700">Nome do Funcionário</label>
+                        <input type="text" id="employee-name" name="employee-name" placeholder="Seu nome" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-brand focus:ring-primary-brand p-3 border" required>
+                    </div>
+
+                    <div>
+                        <label for="car-select" class="block text-sm font-medium text-gray-700">Escolha o Carro</label>
+                        <select id="car-select" name="car-select" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-brand focus:ring-primary-brand p-3 border bg-white" required>
+                            <option value="">Selecione um carro</option>
+                            <option value="UNO Branco (OQR4C49)">UNO Branco (OQR4C49)</option>
+                            <option value="UNO Cinza (HMZ7J25)">UNO Cinza (HMZ7J25)</option>
+                            <option value="MOBI Preto (GFU4E56)">MOBI Preto (GFU4E56)</option>
+                            <option value="Ford Ka Preto (OMC 6886)">Ford Ka Preto (OMC 6886)</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label for="booking-date" class="block text-sm font-medium text-gray-700">Selecione o Dia</label>
+                        <input type="date" id="booking-date" name="booking-date" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-brand focus:ring-primary-brand p-3 border" required>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Selecione o Turno</label>
+                        <div class="mt-2 space-y-2">
+                            <div class="flex items-center">
+                                <input id="turno-manha" name="turno" type="radio" value="Manhã" class="focus:ring-primary-brand h-4 w-4 text-primary-brand border-gray-300" required>
+                                <label for="turno-manha" class="ml-2 block text-sm text-gray-900">Manhã</label>
+                            </div>
+                            <div class="flex items-center">
+                                <input id="turno-tarde" name="turno" type="radio" value="Tarde" class="focus:ring-primary-brand h-4 w-4 text-primary-brand border-gray-300">
+                                <label for="turno-tarde" class="ml-2 block text-sm text-gray-900">Tarde</label>
+                            </div>
+                            <div class="flex items-center">
+                                <input id="turno-integral" name="turno" type="radio" value="Integral" class="focus:ring-primary-brand h-4 w-4 text-primary-brand border-gray-300">
+                                <label for="turno-integral" class="ml-2 block text-sm text-gray-900">Integral</label>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <label for="booking-reason" class="block text-sm font-medium text-gray-700">Motivo do Agendamento</label>
+                        <textarea id="booking-reason" name="booking-reason" rows="3" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-brand focus:ring-primary-brand p-3 border" placeholder="Reunião com cliente, viagem a trabalho, etc." required></textarea>
+                    </div>
+                    
+                    <button type="submit" class="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-brand hover:bg-secondary-brand focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-brand">
+                        Agendar Carro
+                    </button>
+                </form>
+            </div>
+
+            <!-- Seção de Calendário e Lista de Agendamentos -->
+            <div class="p-6 bg-gray-50 rounded-lg border border-gray-200 shadow-inner">
+                <div class="flex justify-between items-center mb-6">
+                    <button id="prev-month" class="p-2 rounded-full hover:bg-gray-200 transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+                        </svg>
+                    </button>
+                    <h2 id="current-month-year" class="text-2xl font-semibold text-dark-brand"></h2>
+                    <button id="next-month" class="p-2 rounded-full hover:bg-gray-200 transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                        </svg>
+                    </button>
+                </div>
+                
+                <div class="calendar-grid mb-6">
+                    <div class="calendar-header">Dom</div>
+                    <div class="calendar-header">Seg</div>
+                    <div class="calendar-header">Ter</div>
+                    <div class="calendar-header">Qua</div>
+                    <div class="calendar-header">Qui</div>
+                    <div class="calendar-header">Sex</div>
+                    <div class="calendar-header">Sáb</div>
+                </div>
+
+                <div id="calendar-body" class="calendar-grid">
+                    <!-- As células do calendário serão geradas aqui pelo JavaScript -->
+                </div>
+
+                <hr class="my-8 border-gray-300" />
+                
+                <div>
+                    <h3 class="text-xl font-semibold mb-4 text-dark-brand">Reservas para <span id="selected-date-text">hoje</span></h3>
+                    <div id="bookings-list" class="space-y-4">
+                        <!-- As reservas para o dia selecionado serão exibidas aqui -->
+                    </div>
+                    <p id="no-bookings-message" class="text-gray-500 italic hidden">Nenhuma reserva para este dia.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript para a lógica do aplicativo -->
+    <script type="module">
+        // Importa os módulos necessários do Firebase
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
+        import { getFirestore, onSnapshot, collection, query, where, getDocs, addDoc, doc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
+        
+        // ======================================================================
+        // ATENÇÃO: A CONFIGURAÇÃO DO FIREBASE FOI ATUALIZADA COM BASE NA SUA SOLICITAÇÃO
+        // ======================================================================
+        const firebaseConfig = {
+          apiKey: "AIzaSyAkjZLCY69LWAIA6ULZIYbPYJa8iUgEYx8",
+          authDomain: "agenda-carro.firebaseapp.com",
+          projectId: "agenda-carro",
+          storageBucket: "agenda-carro.firebasestorage.app",
+          messagingSenderId: "680324128563",
+          appId: "1:680324128563:web:417e7a98ce345668f9a846",
+          measurementId: "G-NJTNDK3KQ6"
+        };
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        // ======================================================================
+
+        // Variáveis de estado
+        let currentMonth = new Date().getMonth();
+        let currentYear = new Date().getFullYear();
+        let selectedDate = new Date();
+        let reservations = [];
+        let db;
+        let auth;
+        let bookingsCollectionRef;
+        let userId;
+
+        // Função para exibir uma caixa de mensagem temporária
+        function showMessage(message, type = 'info') {
+            const messageBox = document.getElementById('message-box');
+            messageBox.textContent = message;
+            messageBox.className = `message-box ${type}`;
+            messageBox.style.display = 'block';
+            setTimeout(() => {
+                messageBox.style.display = 'none';
+            }, 3000); // Esconde a mensagem após 3 segundos
+        }
+
+        // Helper function para formatar a data como YYYY-MM-DD
+        const formatDate = (date) => {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        };
+
+        // Função para exibir as reservas de uma data específica
+        const displayBookings = (date) => {
+            const bookingsList = document.getElementById('bookings-list');
+            const selectedDateText = document.getElementById('selected-date-text');
+            const noBookingsMessage = document.getElementById('no-bookings-message');
+            
+            bookingsList.innerHTML = '';
+            selectedDateText.textContent = date.toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' });
+            
+            const formattedDate = formatDate(date);
+            const dayBookings = reservations.filter(res => res.date === formattedDate);
+            
+            if (dayBookings.length === 0) {
+                noBookingsMessage.classList.remove('hidden');
+            } else {
+                noBookingsMessage.classList.add('hidden');
+                dayBookings.forEach(booking => {
+                    const bookingItem = document.createElement('div');
+                    bookingItem.classList.add('p-4', 'rounded-md', 'bg-accent-brand', 'border-l-4', 'border-primary-brand', 'flex', 'justify-between', 'items-center');
+                    bookingItem.dataset.id = booking.id;
+                    bookingItem.innerHTML = `
+                        <div>
+                            <p class="text-sm font-medium text-gray-900">${booking.car} - <span class="font-bold">${booking.shift}</span></p>
+                            <p class="text-xs text-gray-600">Funcionário: ${booking.employeeName}</p>
+                            <p class="text-xs italic text-gray-500">Motivo: ${booking.reason}</p>
+                        </div>
+                        ${booking.userId === userId ? `
+                          <button class="delete-btn bg-red-500 text-white p-2 rounded-full shadow-md hover:bg-red-600 transition-colors">
+                              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 112 0v6a1 1 0 11-2 0V8z" clip-rule="evenodd" />
+                              </svg>
+                          </button>
+                        ` : ''}
+                    `;
+                    bookingsList.appendChild(bookingItem);
+                });
+                
+                // Adiciona os event listeners aos botões de exclusão
+                document.querySelectorAll('.delete-btn').forEach(button => {
+                    button.addEventListener('click', async (e) => {
+                        const bookingItem = e.target.closest('[data-id]');
+                        const bookingId = bookingItem.dataset.id;
+                        
+                        try {
+                            const bookingRef = doc(db, bookingsCollectionRef.path, bookingId);
+                            await deleteDoc(bookingRef);
+                            showMessage('Agendamento excluído com sucesso!', 'success');
+                        } catch (error) {
+                            console.error("Erro ao excluir documento: ", error);
+                            showMessage("Ocorreu um erro ao excluir o agendamento. Tente novamente.", 'error');
+                        }
+                    });
+                });
+            }
+        };
+
+        // Função para renderizar a grade do calendário
+        const renderCalendar = () => {
+            const calendarBody = document.getElementById('calendar-body');
+            const currentMonthYearEl = document.getElementById('current-month-year');
+            
+            calendarBody.innerHTML = '';
+            
+            const firstDayOfMonth = new Date(currentYear, currentMonth, 1).getDay();
+            const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+            
+            currentMonthYearEl.textContent = new Date(currentYear, currentMonth).toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
+            
+            // Adiciona células vazias para preenchimento
+            for (let i = 0; i < firstDayOfMonth; i++) {
+                const emptyCell = document.createElement('div');
+                emptyCell.classList.add('day-cell', 'bg-gray-200');
+                calendarBody.appendChild(emptyCell);
+            }
+            
+            // Adiciona as células dos dias
+            for (let day = 1; day <= daysInMonth; day++) {
+                const dayCell = document.createElement('div');
+                dayCell.classList.add('day-cell');
+                const date = new Date(currentYear, currentMonth, day);
+                const formattedDate = formatDate(date);
+
+                // Verifica se há reservas neste dia
+                const hasBooking = reservations.some(res => res.date === formattedDate);
+                if (hasBooking) {
+                    dayCell.classList.add('has-booking');
+                }
+
+                // Verifica se é a data selecionada
+                if (formattedDate === formatDate(selectedDate)) {
+                  dayCell.classList.add('active-day');
+                }
+
+                dayCell.innerHTML = `<span class="font-semibold text-gray-700">${day}</span>`;
+                dayCell.dataset.date = formattedDate;
+                
+                dayCell.addEventListener('click', () => {
+                    selectedDate = date;
+                    document.getElementById('booking-date').value = formattedDate;
+                    renderCalendar(); // Re-renderiza para atualizar o dia ativo
+                    displayBookings(selectedDate);
+                });
+                
+                calendarBody.appendChild(dayCell);
+            }
+        };
+        
+        document.addEventListener('DOMContentLoaded', async () => {
+            // Referências de elementos HTML
+            const bookingForm = document.getElementById('booking-form');
+            const carSelect = document.getElementById('car-select');
+            const bookingDateInput = document.getElementById('booking-date');
+            const bookingReasonInput = document.getElementById('booking-reason');
+            const employeeNameInput = document.getElementById('employee-name');
+            const prevMonthBtn = document.getElementById('prev-month');
+            const nextMonthBtn = document.getElementById('next-month');
+            const userIdEl = document.getElementById('user-id');
+
+            // Inicializa o Firebase
+            try {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                // Usar onAuthStateChanged para garantir que a autenticação esteja pronta antes de continuar
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        userIdEl.textContent = userId;
+                        bookingsCollectionRef = collection(db, `/artifacts/${appId}/public/data/bookings`);
+
+                        // Inicia o listener em tempo real para sincronizar os dados
+                        startRealtimeListener();
+
+                        // Define a data inicial e exibe as reservas
+                        const today = new Date();
+                        selectedDate = today;
+                        bookingDateInput.value = formatDate(today);
+                        displayBookings(today);
+                    } else {
+                        // Se o usuário não estiver autenticado, tente o login anônimo
+                        try {
+                            await signInAnonymously(auth);
+                            // onAuthStateChanged será acionado novamente com o novo usuário
+                        } catch (error) {
+                            console.error("Erro ao autenticar anonimamente:", error);
+                            showMessage("Ocorreu um erro ao carregar o aplicativo. Verifique sua conexão.", 'error');
+                        }
+                    }
+                });
+
+            } catch (error) {
+                console.error("Erro ao inicializar o Firebase:", error);
+                showMessage("Ocorreu um erro ao carregar o aplicativo. Verifique sua conexão.", 'error');
+            }
+
+
+            // Função para iniciar o listener em tempo real do Firestore
+            function startRealtimeListener() {
+                onSnapshot(bookingsCollectionRef, (querySnapshot) => {
+                    const fetchedBookings = [];
+                    querySnapshot.forEach((doc) => {
+                        fetchedBookings.push({ id: doc.id, ...doc.data() });
+                    });
+                    // Ordena as reservas por data
+                    reservations = fetchedBookings.sort((a, b) => new Date(a.date) - new Date(b.date));
+                    console.log("Reservas atualizadas:", reservations);
+                    renderCalendar();
+                    displayBookings(selectedDate);
+                }, (error) => {
+                    console.error("Erro ao ouvir atualizações em tempo real:", error);
+                    showMessage("Erro ao carregar reservas. Tente novamente mais tarde.", 'error');
+                });
+            }
+            
+            // Lidar com o envio do formulário
+            bookingForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+
+                // Verifica se o usuário está autenticado
+                if (!userId) {
+                    showMessage('Usuário não autenticado. Por favor, recarregue a página.', 'error');
+                    return;
+                }
+                
+                const newBooking = {
+                    employeeName: employeeNameInput.value,
+                    car: carSelect.value,
+                    date: bookingDateInput.value,
+                    shift: document.querySelector('input[name="turno"]:checked').value,
+                    reason: bookingReasonInput.value,
+                    userId: userId, // Salva o ID do usuário anônimo
+                    createdAt: new Date().toISOString()
+                };
+                
+                // Verifica se já existe uma reserva para o mesmo carro, dia e turno
+                const q = query(bookingsCollectionRef, 
+                    where("car", "==", newBooking.car),
+                    where("date", "==", newBooking.date),
+                    where("shift", "==", newBooking.shift)
+                );
+                
+                try {
+                    const querySnapshot = await getDocs(q);
+                    if (!querySnapshot.empty) {
+                        showMessage('Este carro já foi agendado para o dia e turno selecionados. Por favor, escolha outro carro ou horário.', 'error');
+                        return;
+                    }
+
+                    await addDoc(bookingsCollectionRef, newBooking);
+                    bookingForm.reset();
+                    showMessage('Agendamento realizado com sucesso!', 'success');
+                } catch (error) {
+                    console.error("Erro ao adicionar documento: ", error);
+                    showMessage("Ocorreu um erro ao salvar o agendamento. Tente novamente.", 'error');
+                }
+            });
+            
+            // Lidar com a navegação entre meses
+            prevMonthBtn.addEventListener('click', () => {
+                currentMonth--;
+                if (currentMonth < 0) {
+                    currentMonth = 11;
+                    currentYear--;
+                }
+                renderCalendar();
+            });
+            
+            nextMonthBtn.addEventListener('click', () => {
+                currentMonth++;
+                if (currentMonth > 11) {
+                    currentMonth = 0;
+                    currentYear++;
+                }
+                renderCalendar();
+            });
+        });
+    </script>
+</body>
+</html>
